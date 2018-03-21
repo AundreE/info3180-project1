@@ -4,12 +4,12 @@ Jinja2 Documentation:    http://jinja.pocoo.org/2/documentation/
 Werkzeug Documentation:  http://werkzeug.pocoo.org/documentation/
 This file creates your application.
 """
-
-from app import app, db, login_manager
-from flask import render_template, request, redirect, url_for, flash
-from flask_login import login_user, logout_user, current_user, login_required
-from forms import LoginForm
+import os, random, datetime, uuid
+from app import app, db
+from flask import render_template, request, redirect, url_for, flash, session, abort, make_response, jsonify, make_response
+from forms import SignUpForm
 from models import UserProfile
+from werkzeug.utils import secure_filename
 
 
 ###
@@ -18,7 +18,6 @@ from models import UserProfile
 
 @app.route('/')
 def home():
-    """Render website's home page."""
     return render_template('home.html')
 
 
@@ -28,61 +27,73 @@ def about():
     return render_template('about.html')
 
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    form = LoginForm()
+@app.route('/profile', methods=["GET", "POST"])
+def profile():
+    form = SignUpForm()
+    
     if request.method == "POST":
-        # change this to actually validate the entire form submission
-        # and not just one field
-        if form.username.data:
-            # Get the username and password values from the form.
+        file_folder = app.config['UPLOAD_FOLDER']
+        
+        if form.validate_on_submit():
+            
+            # get form data
+            fname = form.first_name.data
+            lname = form.last_name.data
+            gender = form.gender.data
+            email = form.email.data
+            location = form.location.data
+            biography = form.biography.data
+            created = str(datetime.datetime.now()) 
+            
+            # get and save the image
+            pic = request.files['image']
+            image = secure_filename(pic.filename)
+            
+            #validate file upload on submit
+            pic.save(os.path.join(app.config['UPLOAD_FOLDER'], image))
+            
+            # generate unique user id
+            userid = str(uuid.uuid3(uuid.NAMESPACE_DNS, str(fname)))
+            
+            #Save data to database
+            new_user = UserProfile(userid,fname,lname,gender,email,location,biography,image, created_on)
+           
+                
+            db.session.add(new_user)
+            db.session.commit()
+            
+            flash("Created Successfully", "success")
+            return redirect(url_for("profile"))
+        flash_errors(form)
+    print form.errors.tems()    
+    return render_template("signup.html", form=form)
+   
+@app.route('/profiles', methods=["GET", "POST"])
+def profiles():
+    users = UserProfile.query.all()
+    user_list =[{"userid":user.userid,"FirstName": user.fname, "LastName": user.lname, "gender": user.gender, "Location": user.location} for user in users]
+    
+    if request.method == "GET":
+        if users is not None:
+            file_folder = app.config['UPLOAD_FOLDER']
+            return render_template("view_all.html", user_list=users)
+    
+    elif request.method == "POST":
+        response = make_response(jsonify({"users": user_list}))                                           
+        response.headers['Content-Type'] = 'application/json'            
+        return response
+    
+@app.route('/profile/<userid>', methods=["GET", "POST"])
+def get_profile(userid):
+    
+    user = UserProfile.query.filter_by(userid=userid).first()
+    if user is not None:
+        return render_template('profile.html',user=user)
+    else:
+        flash('Unable to view user profile', 'danger')
+        return redirect(url_for('profile'))
 
-            # using your model, query database for a user based on the username
-            # and password submitted
-            # store the result of that query to a `user` variable so it can be
-            # passed to the login_user() method.
 
-            # get user id, load into session
-            login_user(user)
-
-            # remember to flash a message to the user
-            return redirect(url_for("home"))  # they should be redirected to a secure-page route instead
-    return render_template("login.html", form=form)
-
-
-# user_loader callback. This callback is used to reload the user object from
-# the user ID stored in the session
-@login_manager.user_loader
-def load_user(id):
-    return UserProfile.query.get(int(id))
-
-###
-# The functions below should be applicable to all Flask apps.
-###
-
-
-@app.route('/<file_name>.txt')
-def send_text_file(file_name):
-    """Send your static text file."""
-    file_dot_text = file_name + '.txt'
-    return app.send_static_file(file_dot_text)
-
-
-@app.after_request
-def add_header(response):
-    """
-    Add headers to both force latest IE rendering engine or Chrome Frame,
-    and also to cache the rendered page for 10 minutes.
-    """
-    response.headers['X-UA-Compatible'] = 'IE=Edge,chrome=1'
-    response.headers['Cache-Control'] = 'public, max-age=0'
-    return response
-
-
-@app.errorhandler(404)
-def page_not_found(error):
-    """Custom 404 page."""
-    return render_template('404.html'), 404
 
 
 if __name__ == '__main__':
